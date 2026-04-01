@@ -193,6 +193,7 @@ async def buy_callback(update: Update, context):
             title=f"{credits_amount} кредитов",
             description=f"{credits_amount} кредитов для генерации кода в Roblox Studio",
             payload=f"credits_{credits_amount}",
+            provider_token="",
             currency="XTR",
             prices=[LabeledPrice(label=f"{credits_amount} кредитов", amount=stars)],
         )
