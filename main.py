@@ -2,6 +2,7 @@ import os
 import json
 import logging
 from contextlib import asynccontextmanager
+from datetime import date
 
 from fastapi import FastAPI, Request, HTTPException, Header
 from telegram import Update
@@ -28,10 +29,23 @@ tasks_queue: dict[str, list[dict]] = {}
 user_sessions: dict[int, str] = {}
 user_credits: dict[int, int] = {}          # telegram user_id -> кредиты
 used_promos: dict[str, int] = {}           # промокод -> user_id кто использовал
+user_last_daily: dict[int, date] = {}      # telegram user_id -> дата последнего начисления
+
+DAILY_CREDITS = 3
 
 
 def get_credits(user_id: int) -> int:
     return user_credits.get(user_id, NEW_USER_CREDITS)
+
+
+def give_daily_credits(user_id: int) -> bool:
+    """Начисляет 3 ежедневных кредита если сегодня ещё не начислялись. Возвращает True если начислил."""
+    today = date.today()
+    if user_last_daily.get(user_id) != today:
+        user_credits[user_id] = get_credits(user_id) + DAILY_CREDITS
+        user_last_daily[user_id] = today
+        return True
+    return False
 
 
 def spend_credit(user_id: int) -> bool:
@@ -55,9 +69,11 @@ async def start_command(update: Update, context):
     user_id = update.effective_user.id
     if user_id not in user_credits:
         user_credits[user_id] = NEW_USER_CREDITS
+    give_daily_credits(user_id)
     await update.message.reply_text(
         f"Привет! Я бот-мост между тобой и Roblox Studio.\n"
-        f"У тебя {get_credits(user_id)} кредитов (1 запрос = 1 кредит).\n\n"
+        f"У тебя {get_credits(user_id)} кредитов (1 запрос = 1 кредит).\n"
+        f"Каждый день +{DAILY_CREDITS} бесплатных кредита.\n\n"
         f"Плагин для Studio: {PLUGIN_URL}\n\n"
         "Используй /help чтобы увидеть все команды."
     )
@@ -84,8 +100,10 @@ async def help_command(update: Update, context):
 
 async def balance_command(update: Update, context):
     user_id = update.effective_user.id
+    got_daily = give_daily_credits(user_id)
     credits = get_credits(user_id)
-    await update.message.reply_text(f"Твой баланс: {credits} кредитов")
+    daily_msg = f" (+{DAILY_CREDITS} ежедневных начислено!)" if got_daily else ""
+    await update.message.reply_text(f"Твой баланс: {credits} кредитов{daily_msg}")
 
 
 async def redeem_command(update: Update, context):
@@ -215,6 +233,9 @@ async def handle_message(update: Update, context):
             "(session_id покажет плагин при запуске)"
         )
         return
+
+    # Начисляем ежедневные кредиты если нужно
+    give_daily_credits(user_id)
 
     # Проверяем кредиты
     if not spend_credit(user_id):
