@@ -63,7 +63,20 @@ def get_valid_promos() -> list[str]:
 
 # --- Telegram handlers ---
 
-PLUGIN_URL = "https://create.roblox.com/store/asset/131488088668627/RobloxAi"
+PLUGIN_FILE = "QwenAssistant.lua"
+INSTALL_INSTRUCTIONS = (
+    "📥 Установка плагина:\n\n"
+    "1. Скачай файл QwenAssistant.lua выше\n"
+    "2. Скопируй его в папку:\n"
+    "   Windows: %localappdata%\\Roblox\\Plugins\\\n"
+    "   (вставь путь в адресную строку проводника)\n"
+    "3. Открой Roblox Studio\n"
+    "4. Game Settings → Security → включи Allow HTTP Requests\n"
+    "5. В тулбаре появится кнопка Qwen Assistant\n"
+    "6. Нажми на неё — увидишь Session ID\n"
+    "7. Напиши боту: /connect <session_id>\n\n"
+    "Готово! Теперь пиши что хочешь создать."
+)
 
 async def start_command(update: Update, context):
     user_id = update.effective_user.id
@@ -74,8 +87,8 @@ async def start_command(update: Update, context):
         f"Привет! Я бот-мост между тобой и Roblox Studio.\n"
         f"У тебя {get_credits(user_id)} кредитов (1 запрос = 1 кредит).\n"
         f"Каждый день +{DAILY_CREDITS} бесплатных кредита.\n\n"
-        f"Плагин для Studio: {PLUGIN_URL}\n\n"
-        "Используй /help чтобы увидеть все команды."
+        "Используй /help чтобы увидеть все команды.\n"
+        "Используй /plugin чтобы получить файл плагина."
     )
 
 
@@ -86,6 +99,7 @@ async def help_command(update: Update, context):
         "Команды:\n\n"
         "/start — начало работы\n"
         "/help — список команд\n"
+        "/plugin — получить файл плагина + инструкция\n"
         "/connect <session_id> — привязать к Roblox Studio плагину\n"
         "/status — статус подключения и очереди\n"
         "/clear — очистить очередь задач\n"
@@ -93,9 +107,20 @@ async def help_command(update: Update, context):
         "/redeem <промокод> — активировать промокод\n\n"
         f"Твой баланс: {credits} кредитов\n"
         "1 кредит = 1 запрос к AI\n\n"
-        f"Плагин для Studio: {PLUGIN_URL}\n\n"
         "Пиши что хочешь создать в Roblox Studio — AI сгенерирует код!"
     )
+
+
+async def plugin_command(update: Update, context):
+    try:
+        with open(PLUGIN_FILE, "rb") as f:
+            await update.message.reply_document(
+                document=f,
+                filename="QwenAssistant.lua",
+                caption=INSTALL_INSTRUCTIONS
+            )
+    except FileNotFoundError:
+        await update.message.reply_text("Файл плагина не найден на сервере.")
 
 
 async def balance_command(update: Update, context):
@@ -551,6 +576,7 @@ async def lifespan(app: FastAPI):
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("plugin", plugin_command))
     application.add_handler(CommandHandler("balance", balance_command))
     application.add_handler(CommandHandler("redeem", redeem_command))
     application.add_handler(CommandHandler("connect", connect_command))
