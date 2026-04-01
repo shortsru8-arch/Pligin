@@ -13,15 +13,21 @@ client = AsyncOpenAI(
 )
 
 
-async def ask_qwen(system_prompt: str, user_message: str, model: str = "qwen/qwen-plus") -> str:
+async def ask_qwen(system_prompt: str, user_message: str, model: str = "qwen/qwen-plus", system_override: bool = False) -> str:
     """Отправляет запрос в Qwen и возвращает ответ."""
-    response = await client.chat.completions.create(
-        model=model,
-        messages=[
+    messages = []
+    if system_override:
+        # user_message уже содержит всё (для проверки кода)
+        messages = [{"role": "user", "content": user_message}]
+    else:
+        messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message},
-        ],
-        temperature=0.7,
+        ]
+    response = await client.chat.completions.create(
+        model=model,
+        messages=messages,
+        temperature=0.3,
         max_tokens=4096,
     )
     return response.choices[0].message.content

@@ -96,7 +96,29 @@ SYSTEM_PROMPT = """Ты — AI-ассистент для создания объ
 Поле "parent" — куда поместить (Workspace, ServerScriptService, ReplicatedStorage и т.д.)
 Поле "code" — валидный Roblox Lua код.
 
-Всегда генерируй рабочий, безопасный код. Не используй require() для внешних модулей.
+ЗАПРЕЩЕНО в коде:
+- WaitForChild() без таймаута — используй WaitForChild("name", 5) с таймаутом
+- Присваивать RootPart напрямую — это read-only свойство
+- Использовать require() для внешних модулей
+- Предполагать что объекты уже существуют в Workspace без проверки (всегда проверяй через FindFirstChild)
+- Бесконечные циклы без wait() внутри
+
+ОБЯЗАТЕЛЬНО:
+- Все WaitForChild с таймаутом: WaitForChild("X", 5)
+- Перед доступом к объекту проверяй его существование: if obj then ... end
+- Humanoid создавай сам через Instance.new если нужен, не жди его
+- RootPart не трогай, используй PrimaryPart для Model
+"""
+
+REVIEW_PROMPT = """Проверь этот Roblox Lua JSON код на ошибки. Исправь если найдёшь:
+1. WaitForChild без таймаута → добавь второй аргумент (число секунд)
+2. Присваивание RootPart → убери, это read-only
+3. Обращение к объектам без проверки существования → добавь if obj then
+4. Бесконечные циклы без wait() → добавь wait(0.1) внутрь
+
+Верни ТОЛЬКО исправленный JSON (без markdown, без объяснений). Если ошибок нет — верни тот же JSON.
+
+JSON для проверки:
 """
 
 
@@ -116,6 +138,21 @@ async def handle_message(update: Update, context):
 
     try:
         response = await ask_qwen(SYSTEM_PROMPT, user_text)
+
+        # 3 круга проверки кода перед отправкой
+        for i in range(3):
+            reviewed = await ask_qwen("", REVIEW_PROMPT + response, system_override=True)
+            reviewed = reviewed.strip()
+            if reviewed.startswith("```"):
+                reviewed = reviewed.split("\n", 1)[1] if "\n" in reviewed else reviewed[3:]
+                if reviewed.endswith("```"):
+                    reviewed = reviewed[:-3]
+                reviewed = reviewed.strip()
+            try:
+                json.loads(reviewed)  # проверяем что JSON валидный
+                response = reviewed
+            except json.JSONDecodeError:
+                break  # если review сломал JSON — берём предыдущую версию
 
         # Парсим JSON из ответа Qwen
         # Убираем возможные markdown обёртки
