@@ -49,6 +49,8 @@ def get_valid_promos() -> list[str]:
 
 # --- Telegram handlers ---
 
+PLUGIN_URL = "https://create.roblox.com/store/asset/131488088668627/RobloxAi"
+
 async def start_command(update: Update, context):
     user_id = update.effective_user.id
     if user_id not in user_credits:
@@ -56,6 +58,7 @@ async def start_command(update: Update, context):
     await update.message.reply_text(
         f"Привет! Я бот-мост между тобой и Roblox Studio.\n"
         f"У тебя {get_credits(user_id)} кредитов (1 запрос = 1 кредит).\n\n"
+        f"Плагин для Studio: {PLUGIN_URL}\n\n"
         "Используй /help чтобы увидеть все команды."
     )
 
@@ -74,6 +77,7 @@ async def help_command(update: Update, context):
         "/redeem <промокод> — активировать промокод\n\n"
         f"Твой баланс: {credits} кредитов\n"
         "1 кредит = 1 запрос к AI\n\n"
+        f"Плагин для Studio: {PLUGIN_URL}\n\n"
         "Пиши что хочешь создать в Roblox Studio — AI сгенерирует код!"
     )
 
