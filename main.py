@@ -573,21 +573,6 @@ async def handle_message(update: Update, context):
     try:
         response = await ask_qwen(SYSTEM_PROMPT, user_text)
 
-        # 3 круга проверки кода перед отправкой
-        for i in range(3):
-            reviewed = await ask_qwen("", REVIEW_PROMPT + response, system_override=True)
-            reviewed = reviewed.strip()
-            if reviewed.startswith("```"):
-                reviewed = reviewed.split("\n", 1)[1] if "\n" in reviewed else reviewed[3:]
-                if reviewed.endswith("```"):
-                    reviewed = reviewed[:-3]
-                reviewed = reviewed.strip()
-            try:
-                json.loads(reviewed)
-                response = reviewed
-            except json.JSONDecodeError:
-                break
-
         clean = response.strip()
         if clean.startswith("```"):
             clean = clean.split("\n", 1)[1] if "\n" in clean else clean[3:]
