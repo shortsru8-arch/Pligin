@@ -9,7 +9,7 @@ from telegram import Update, LabeledPrice
 from telegram.ext import Application, CommandHandler, MessageHandler, PreCheckoutQueryHandler, filters
 from dotenv import load_dotenv
 
-from qwen_client import ask_qwen
+from qwen_client import ask_qwen, review_code
 
 load_dotenv()
 
@@ -572,6 +572,20 @@ async def handle_message(update: Update, context):
 
     try:
         response = await ask_qwen(SYSTEM_PROMPT, user_text)
+
+        # Проверка кода вторым ключом
+        reviewed = await review_code(REVIEW_PROMPT + response)
+        reviewed = reviewed.strip()
+        if reviewed.startswith("```"):
+            reviewed = reviewed.split("\n", 1)[1] if "\n" in reviewed else reviewed[3:]
+            if reviewed.endswith("```"):
+                reviewed = reviewed[:-3]
+            reviewed = reviewed.strip()
+        try:
+            json.loads(reviewed)
+            response = reviewed
+        except json.JSONDecodeError:
+            pass  # если review сломал JSON — берём оригинал
 
         clean = response.strip()
         if clean.startswith("```"):
