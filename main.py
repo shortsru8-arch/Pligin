@@ -32,6 +32,11 @@ used_promos: dict[str, int] = {}           # промокод -> user_id кто 
 user_last_daily: dict[int, date] = {}      # telegram user_id -> дата последнего начисления
 
 DAILY_CREDITS = 3
+SALE_MULTIPLIER = 1.5  # акция: x1.5 кредитов везде (поставь 1.0 чтобы отключить)
+
+
+def apply_sale(credits: int) -> int:
+    return int(credits * SALE_MULTIPLIER)
 
 
 def get_credits(user_id: int) -> int:
@@ -39,10 +44,10 @@ def get_credits(user_id: int) -> int:
 
 
 def give_daily_credits(user_id: int) -> bool:
-    """Начисляет 3 ежедневных кредита если сегодня ещё не начислялись. Возвращает True если начислил."""
+    """Начисляет ежедневные кредиты если сегодня ещё не начислялись. Возвращает True если начислил."""
     today = date.today()
     if user_last_daily.get(user_id) != today:
-        user_credits[user_id] = get_credits(user_id) + DAILY_CREDITS
+        user_credits[user_id] = get_credits(user_id) + apply_sale(DAILY_CREDITS)
         user_last_daily[user_id] = today
         return True
     return False
@@ -81,7 +86,7 @@ INSTALL_INSTRUCTIONS = (
 async def start_command(update: Update, context):
     user_id = update.effective_user.id
     if user_id not in user_credits:
-        user_credits[user_id] = NEW_USER_CREDITS
+        user_credits[user_id] = apply_sale(NEW_USER_CREDITS)
     give_daily_credits(user_id)
     await update.message.reply_text(
         f"Привет! Я бот-мост между тобой и Roblox Studio.\n"
@@ -150,9 +155,10 @@ async def redeem_command(update: Update, context):
         return
 
     used_promos[code] = user_id
-    user_credits[user_id] = get_credits(user_id) + PROMO_CREDITS
+    earned = apply_sale(PROMO_CREDITS)
+    user_credits[user_id] = get_credits(user_id) + earned
     await update.message.reply_text(
-        f"Промокод активирован! +{PROMO_CREDITS} кредитов.\n"
+        f"Промокод активирован! +{earned} кредитов.\n"
         f"Твой баланс: {get_credits(user_id)} кредитов."
     )
 
@@ -167,14 +173,16 @@ SHOP_PACKAGES = [
 
 async def buy_command(update: Update, context):
     keyboard = [
-        [InlineKeyboardButton("⭐ 25 кредитов — 50 звёзд", callback_data="buy_50_25")],
-        [InlineKeyboardButton("🌟 69 кредитов — 100 звёзд", callback_data="buy_100_69")],
-        [InlineKeyboardButton("💫 199 кредитов — 250 звёзд", callback_data="buy_250_199")],
+        [InlineKeyboardButton(f"⭐ {apply_sale(25)} кредитов — 50 звёзд", callback_data="buy_50_25")],
+        [InlineKeyboardButton(f"🌟 {apply_sale(69)} кредитов — 100 звёзд", callback_data="buy_100_69")],
+        [InlineKeyboardButton(f"💫 {apply_sale(199)} кредитов — 250 звёзд", callback_data="buy_250_199")],
     ]
+    sale_text = f"🔥 АКЦИЯ x{SALE_MULTIPLIER} — кредитов в {SALE_MULTIPLIER} раза больше!\n\n" if SALE_MULTIPLIER > 1.0 else ""
     await update.message.reply_text(
+        f"{sale_text}"
         "Купить кредиты за Telegram Stars ⭐\n\n"
         "1 кредит = 1 запрос к AI\n"
-        "Каждый день бесплатно +3 кредита\n\n"
+        f"Каждый день бесплатно +{apply_sale(DAILY_CREDITS)} кредита\n\n"
         "Выбери пакет:",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
@@ -186,7 +194,7 @@ async def buy_callback(update: Update, context):
         await query.answer()
         parts = query.data.split("_")  # ["buy", "50", "25"]
         stars = int(parts[1])
-        credits_amount = int(parts[2])
+        credits_amount = apply_sale(int(parts[2]))
 
         await context.bot.send_invoice(
             chat_id=query.message.chat_id,
