@@ -9,11 +9,11 @@ DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY")
 # Qwen через OpenRouter (без платёжной информации при регистрации)
 client = AsyncOpenAI(
     api_key=DASHSCOPE_API_KEY,
-    base_url="https://openrouter.ai/api/v1",
+    base_url="https://api.groq.com/openai/v1",
 )
 
 
-async def ask_qwen(system_prompt: str, user_message: str, model: str = "qwen/qwen-plus", system_override: bool = False) -> str:
+async def ask_qwen(system_prompt: str, user_message: str, model: str = "llama-3.3-70b-versatile", system_override: bool = False) -> str:
     """Отправляет запрос в Qwen и возвращает ответ."""
     messages = []
     if system_override:
