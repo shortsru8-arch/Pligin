@@ -182,20 +182,23 @@ async def buy_command(update: Update, context):
 
 async def buy_callback(update: Update, context):
     query = update.callback_query
-    await query.answer()
+    try:
+        await query.answer()
+        parts = query.data.split("_")  # ["buy", "50", "25"]
+        stars = int(parts[1])
+        credits_amount = int(parts[2])
 
-    data = query.data  # buy_50_25
-    _, stars, credits_amount = data.split("_")
-    stars, credits_amount = int(stars), int(credits_amount)
-
-    await context.bot.send_invoice(
-        chat_id=query.message.chat_id,
-        title=f"{credits_amount} кредитов",
-        description=f"{credits_amount} кредитов для генерации кода в Roblox Studio",
-        payload=f"credits_{credits_amount}",
-        currency="XTR",
-        prices=[LabeledPrice(label=f"{credits_amount} кредитов", amount=stars)],
-    )
+        await context.bot.send_invoice(
+            chat_id=query.message.chat_id,
+            title=f"{credits_amount} кредитов",
+            description=f"{credits_amount} кредитов для генерации кода в Roblox Studio",
+            payload=f"credits_{credits_amount}",
+            currency="XTR",
+            prices=[LabeledPrice(label=f"{credits_amount} кредитов", amount=stars)],
+        )
+    except Exception as e:
+        logger.error(f"buy_callback error: {e}")
+        await query.answer(text=f"Ошибка: {e}", show_alert=True)
 
 
 async def precheckout_handler(update: Update, context):
