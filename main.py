@@ -1,12 +1,10 @@
 import os
 import json
-import asyncio
 import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, HTTPException, Header
-from fastapi.responses import JSONResponse
-from telegram import Update, Bot
+from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from dotenv import load_dotenv
 
@@ -17,35 +15,103 @@ load_dotenv()
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 PLUGIN_SECRET = os.getenv("PLUGIN_SECRET", "change-me-secret")
 
+# Промокоды из .env — формат: "RbAi-CODE1,RbAi-CODE2,RbAi-CODE3"
+RAW_PROMOS = os.getenv("PROMO_CODES", "")
+PROMO_CREDITS = 100  # сколько кредитов даёт один промокод
+NEW_USER_CREDITS = 10  # бесплатные кредиты при первом старте
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Хранилище задач для Roblox Studio плагина (в проде заменить на Redis/БД)
-# Формат: {user_id: [{"id": ..., "type": "script"|"build", "code": "...", "done": False}]}
+# --- Хранилища (в проде заменить на БД) ---
 tasks_queue: dict[str, list[dict]] = {}
-
-# Привязка Telegram user -> Roblox plugin session
 user_sessions: dict[int, str] = {}
+user_credits: dict[int, int] = {}          # telegram user_id -> кредиты
+used_promos: dict[str, int] = {}           # промокод -> user_id кто использовал
+
+
+def get_credits(user_id: int) -> int:
+    return user_credits.get(user_id, NEW_USER_CREDITS)
+
+
+def spend_credit(user_id: int) -> bool:
+    """Списывает 1 кредит. Возвращает False если кредитов нет."""
+    credits = get_credits(user_id)
+    if credits <= 0:
+        return False
+    user_credits[user_id] = credits - 1
+    return True
+
+
+def get_valid_promos() -> list[str]:
+    return [p.strip() for p in RAW_PROMOS.split(",") if p.strip()]
 
 
 # --- Telegram handlers ---
 
 async def start_command(update: Update, context):
+    user_id = update.effective_user.id
+    if user_id not in user_credits:
+        user_credits[user_id] = NEW_USER_CREDITS
     await update.message.reply_text(
-        "Привет! Я бот-мост между тобой и Roblox Studio.\n\n"
-        "Команды:\n"
+        f"Привет! Я бот-мост между тобой и Roblox Studio.\n"
+        f"У тебя {get_credits(user_id)} кредитов (1 запрос = 1 кредит).\n\n"
+        "Используй /help чтобы увидеть все команды."
+    )
+
+
+async def help_command(update: Update, context):
+    user_id = update.effective_user.id
+    credits = get_credits(user_id)
+    await update.message.reply_text(
+        "Команды:\n\n"
+        "/start — начало работы\n"
+        "/help — список команд\n"
         "/connect <session_id> — привязать к Roblox Studio плагину\n"
-        "/status — проверить статус подключения\n\n"
-        "Просто напиши что хочешь создать в Roblox Studio, "
-        "и я попрошу Qwen сгенерировать код!"
+        "/status — статус подключения и очереди\n"
+        "/clear — очистить очередь задач\n"
+        "/balance — посмотреть баланс кредитов\n"
+        "/redeem <промокод> — активировать промокод\n\n"
+        f"Твой баланс: {credits} кредитов\n"
+        "1 кредит = 1 запрос к AI\n\n"
+        "Пиши что хочешь создать в Roblox Studio — AI сгенерирует код!"
+    )
+
+
+async def balance_command(update: Update, context):
+    user_id = update.effective_user.id
+    credits = get_credits(user_id)
+    await update.message.reply_text(f"Твой баланс: {credits} кредитов")
+
+
+async def redeem_command(update: Update, context):
+    user_id = update.effective_user.id
+    if not context.args:
+        await update.message.reply_text("Укажи промокод: /redeem <код>")
+        return
+
+    code = context.args[0].strip()
+    valid_promos = get_valid_promos()
+
+    if code not in valid_promos:
+        await update.message.reply_text("Промокод не найден или недействителен.")
+        return
+
+    if code in used_promos:
+        await update.message.reply_text("Этот промокод уже был использован.")
+        return
+
+    used_promos[code] = user_id
+    user_credits[user_id] = get_credits(user_id) + PROMO_CREDITS
+    await update.message.reply_text(
+        f"Промокод активирован! +{PROMO_CREDITS} кредитов.\n"
+        f"Твой баланс: {get_credits(user_id)} кредитов."
     )
 
 
 async def connect_command(update: Update, context):
     if not context.args:
-        await update.message.reply_text(
-            "Укажи session_id из плагина: /connect <session_id>"
-        )
+        await update.message.reply_text("Укажи session_id из плагина: /connect <session_id>")
         return
     session_id = context.args[0]
     user_sessions[update.effective_user.id] = session_id
@@ -64,7 +130,7 @@ async def clear_command(update: Update, context):
         await update.message.reply_text("Ты не подключён.")
         return
     tasks_queue[session_id] = []
-    await update.message.reply_text("Очередь задач очищена. Плагин больше не будет выполнять старые задачи.")
+    await update.message.reply_text("Очередь задач очищена.")
 
 
 async def status_command(update: Update, context):
@@ -74,8 +140,11 @@ async def status_command(update: Update, context):
         await update.message.reply_text("Ты не подключён. Используй /connect <session_id>")
         return
     pending = len([t for t in tasks_queue.get(session_id, []) if not t["done"]])
+    credits = get_credits(user_id)
     await update.message.reply_text(
-        f"Сессия: {session_id}\nЗадач в очереди: {pending}"
+        f"Сессия: {session_id}\n"
+        f"Задач в очереди: {pending}\n"
+        f"Кредитов: {credits}"
     )
 
 
@@ -143,8 +212,17 @@ async def handle_message(update: Update, context):
         )
         return
 
+    # Проверяем кредиты
+    if not spend_credit(user_id):
+        await update.message.reply_text(
+            "У тебя закончились кредиты!\n"
+            "Активируй промокод: /redeem <код>"
+        )
+        return
+
     user_text = update.message.text
-    await update.message.reply_text("Генерирую код... подожди немного.")
+    credits_left = get_credits(user_id)
+    await update.message.reply_text(f"Генерирую код... (осталось кредитов: {credits_left})")
 
     try:
         response = await ask_qwen(SYSTEM_PROMPT, user_text)
@@ -159,13 +237,11 @@ async def handle_message(update: Update, context):
                     reviewed = reviewed[:-3]
                 reviewed = reviewed.strip()
             try:
-                json.loads(reviewed)  # проверяем что JSON валидный
+                json.loads(reviewed)
                 response = reviewed
             except json.JSONDecodeError:
-                break  # если review сломал JSON — берём предыдущую версию
+                break
 
-        # Парсим JSON из ответа Qwen
-        # Убираем возможные markdown обёртки
         clean = response.strip()
         if clean.startswith("```"):
             clean = clean.split("\n", 1)[1] if "\n" in clean else clean[3:]
@@ -174,18 +250,15 @@ async def handle_message(update: Update, context):
             clean = clean.strip()
 
         generated_tasks = json.loads(clean)
-
         if not isinstance(generated_tasks, list):
             generated_tasks = [generated_tasks]
 
-        # Добавляем задачи в очередь
         task_id_start = len(tasks_queue.get(session_id, []))
         for i, task in enumerate(generated_tasks):
             task["id"] = task_id_start + i
             task["done"] = False
             tasks_queue[session_id].append(task)
 
-        # Формируем ответ пользователю
         summary_lines = []
         for task in generated_tasks:
             emoji = "📝" if task["type"] == "script" else "🏗"
@@ -198,16 +271,17 @@ async def handle_message(update: Update, context):
         )
 
     except json.JSONDecodeError:
-        await update.message.reply_text(
-            "Qwen вернул некорректный ответ. Попробуй переформулировать запрос."
-        )
+        # Возвращаем кредит если запрос не удался
+        user_credits[user_id] = get_credits(user_id) + 1
+        await update.message.reply_text("Qwen вернул некорректный ответ. Кредит возвращён. Попробуй переформулировать.")
         logger.error(f"Failed to parse Qwen response: {response[:500]}")
     except Exception as e:
-        await update.message.reply_text(f"Ошибка: {str(e)}")
+        user_credits[user_id] = get_credits(user_id) + 1
+        await update.message.reply_text(f"Ошибка: {str(e)}\nКредит возвращён.")
         logger.error(f"Error handling message: {e}")
 
 
-# --- FastAPI + Telegram integration ---
+# --- FastAPI + Telegram ---
 
 application: Application = None
 
@@ -217,6 +291,9 @@ async def lifespan(app: FastAPI):
     global application
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("balance", balance_command))
+    application.add_handler(CommandHandler("redeem", redeem_command))
     application.add_handler(CommandHandler("connect", connect_command))
     application.add_handler(CommandHandler("status", status_command))
     application.add_handler(CommandHandler("clear", clear_command))
@@ -225,14 +302,11 @@ async def lifespan(app: FastAPI):
     await application.initialize()
     await application.start()
 
-    # Устанавливаем webhook
-    port = int(os.getenv("PORT", 8000))
     webhook_url = os.getenv("WEBHOOK_URL", "")
     if webhook_url:
         await application.bot.set_webhook(f"{webhook_url}/webhook")
         logger.info(f"Webhook set to {webhook_url}/webhook")
     else:
-        # Локальная разработка — polling
         await application.updater.start_polling()
         logger.info("Started polling mode")
 
@@ -255,31 +329,22 @@ async def telegram_webhook(request: Request):
     return {"ok": True}
 
 
-# --- API для Roblox Studio плагина ---
-
 @app.get("/api/tasks/{session_id}")
 async def get_tasks(session_id: str, authorization: str = Header(default="")):
-    """Плагин поллит этот эндпоинт для получения новых задач."""
     if authorization != f"Bearer {PLUGIN_SECRET}":
         raise HTTPException(status_code=401, detail="Invalid secret")
-
-    pending_tasks = [
-        t for t in tasks_queue.get(session_id, []) if not t["done"]
-    ]
+    pending_tasks = [t for t in tasks_queue.get(session_id, []) if not t["done"]]
     return {"tasks": pending_tasks}
 
 
 @app.post("/api/tasks/{session_id}/{task_id}/done")
 async def mark_task_done(session_id: str, task_id: int, authorization: str = Header(default="")):
-    """Плагин отмечает задачу как выполненную."""
     if authorization != f"Bearer {PLUGIN_SECRET}":
         raise HTTPException(status_code=401, detail="Invalid secret")
-
     for task in tasks_queue.get(session_id, []):
         if task["id"] == task_id:
             task["done"] = True
             return {"ok": True}
-
     raise HTTPException(status_code=404, detail="Task not found")
 
 
