@@ -57,6 +57,16 @@ async def connect_command(update: Update, context):
     )
 
 
+async def clear_command(update: Update, context):
+    user_id = update.effective_user.id
+    session_id = user_sessions.get(user_id)
+    if not session_id:
+        await update.message.reply_text("Ты не подключён.")
+        return
+    tasks_queue[session_id] = []
+    await update.message.reply_text("Очередь задач очищена. Плагин больше не будет выполнять старые задачи.")
+
+
 async def status_command(update: Update, context):
     user_id = update.effective_user.id
     session_id = user_sessions.get(user_id)
@@ -209,6 +219,7 @@ async def lifespan(app: FastAPI):
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("connect", connect_command))
     application.add_handler(CommandHandler("status", status_command))
+    application.add_handler(CommandHandler("clear", clear_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     await application.initialize()
