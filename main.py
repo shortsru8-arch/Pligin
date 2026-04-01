@@ -5,8 +5,8 @@ from contextlib import asynccontextmanager
 from datetime import date
 
 from fastapi import FastAPI, Request, HTTPException, Header
-from telegram import Update, LabeledPrice
-from telegram.ext import Application, CommandHandler, MessageHandler, PreCheckoutQueryHandler, filters
+from telegram import Update, LabeledPrice, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, PreCheckoutQueryHandler, filters
 from dotenv import load_dotenv
 
 from qwen_client import ask_qwen, review_code
@@ -157,31 +157,45 @@ async def redeem_command(update: Update, context):
     )
 
 
-# Пакеты покупки: (stars, credits, label)
+# Пакеты покупки: (stars, credits, emoji)
 SHOP_PACKAGES = [
-    (3,  1,  "1 кредит — 3 звезды"),
-    (15, 5,  "5 кредитов — 15 звезд"),
+    (50,  25,  "⭐ 50 звёзд → 25 кредитов"),
+    (100, 69,  "🌟 100 звёзд → 69 кредитов"),
+    (250, 199, "💫 250 звёзд → 199 кредитов"),
 ]
 
 
 async def buy_command(update: Update, context):
-    text = (
-        "Купить кредиты за Telegram Stars:\n\n"
-        "1 кредит = 3 звезды\n"
-        "5 кредитов = 15 звезд\n\n"
-        "Выбери пакет:"
+    keyboard = [
+        [InlineKeyboardButton("⭐ 25 кредитов — 50 звёзд", callback_data="buy_50_25")],
+        [InlineKeyboardButton("🌟 69 кредитов — 100 звёзд", callback_data="buy_100_69")],
+        [InlineKeyboardButton("💫 199 кредитов — 250 звёзд", callback_data="buy_250_199")],
+    ]
+    await update.message.reply_text(
+        "Купить кредиты за Telegram Stars ⭐\n\n"
+        "1 кредит = 1 запрос к AI\n"
+        "Каждый день бесплатно +3 кредита\n\n"
+        "Выбери пакет:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
-    await update.message.reply_text(text)
 
-    for stars, credits_amount, label in SHOP_PACKAGES:
-        await context.bot.send_invoice(
-            chat_id=update.effective_chat.id,
-            title=f"{credits_amount} кредит(ов)",
-            description=f"{credits_amount} кредит(ов) для генерации в Roblox Studio",
-            payload=f"credits_{credits_amount}",
-            currency="XTR",
-            prices=[LabeledPrice(label=label, amount=stars)],
-        )
+
+async def buy_callback(update: Update, context):
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data  # buy_50_25
+    _, stars, credits_amount = data.split("_")
+    stars, credits_amount = int(stars), int(credits_amount)
+
+    await context.bot.send_invoice(
+        chat_id=query.message.chat_id,
+        title=f"{credits_amount} кредитов",
+        description=f"{credits_amount} кредитов для генерации кода в Roblox Studio",
+        payload=f"credits_{credits_amount}",
+        currency="XTR",
+        prices=[LabeledPrice(label=f"{credits_amount} кредитов", amount=stars)],
+    )
 
 
 async def precheckout_handler(update: Update, context):
@@ -641,6 +655,7 @@ async def lifespan(app: FastAPI):
     application.add_handler(CommandHandler("balance", balance_command))
     application.add_handler(CommandHandler("redeem", redeem_command))
     application.add_handler(CommandHandler("buy", buy_command))
+    application.add_handler(CallbackQueryHandler(buy_callback, pattern="^buy_"))
     application.add_handler(CommandHandler("connect", connect_command))
     application.add_handler(CommandHandler("status", status_command))
     application.add_handler(CommandHandler("clear", clear_command))
