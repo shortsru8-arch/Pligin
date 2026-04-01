@@ -79,7 +79,7 @@ logLabel.Parent = frame
 
 -- Состояние
 local isRunning = false
-local executedTaskIds = {}  -- локальный кэш выполненных задач
+local executedTaskIds = {}  -- локальный кэш: taskId -> true (защита от повтора)
 
 -- Маппинг parent строки на реальный объект
 local function getParent(parentName)
@@ -163,12 +163,15 @@ local function pollTasks()
 
 			if data.tasks and #data.tasks > 0 then
 				for _, task in ipairs(data.tasks) do
-					logLabel.Text = "Выполняю: " .. (task.name or "задача")
-					local ok = executeTask(task)
-					if ok then
+					local taskId = tostring(task.id)
+					-- Пропускаем уже выполненные задачи
+					if not executedTaskIds[taskId] then
+						executedTaskIds[taskId] = true  -- сразу помечаем локально
+						logLabel.Text = "Выполняю: " .. (task.name or "задача")
+						executeTask(task)
 						markTaskDone(task.id)
+						task.wait(0.5)
 					end
-					wait(0.5)  -- небольшая пауза между задачами
 				end
 			end
 		end

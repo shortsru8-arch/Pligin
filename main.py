@@ -424,6 +424,18 @@ REMOTE EVENTS (клиент ↔ сервер):
   -- События внизу
   Players.PlayerAdded:Connect(...)
 
+ОСВЕЩЕНИЕ ОБЪЕКТОВ (Light):
+  PointLight, SpotLight, SurfaceLight — дочерние объекты Part
+  Свойства: Brightness(число), Range(число), Color(Color3), Enabled(bool)
+  SpotLight: + Angle(число), Face(Enum.NormalId)
+  SurfaceLight: + Angle(число), Face(Enum.NormalId)
+  ЗАПРЕЩЕНО: InverseSquared — такого свойства НЕ СУЩЕСТВУЕТ
+  Пример:
+    local light = Instance.new("PointLight", part)
+    light.Brightness = 2
+    light.Range = 20
+    light.Color = Color3.fromRGB(255, 200, 100)
+
 ЗАПРЕЩЕНО:
   wait()        → task.wait()
   spawn()       → task.spawn()
@@ -431,6 +443,7 @@ REMOTE EVENTS (клиент ↔ сервер):
   WaitForChild без таймаута → WaitForChild("x", 5)
   part.RootPart = x  → read-only, не трогай
   Infinite loop без yield → добавь task.wait()
+  light.InverseSquared → не существует, удали
 
 ОБЯЗАТЕЛЬНО:
   if obj then ... end   -- всегда проверяй перед использованием
