@@ -5,8 +5,8 @@ from contextlib import asynccontextmanager
 from datetime import date
 
 from fastapi import FastAPI, Request, HTTPException, Header
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters
+from telegram import Update, LabeledPrice
+from telegram.ext import Application, CommandHandler, MessageHandler, PreCheckoutQueryHandler, filters
 from dotenv import load_dotenv
 
 from qwen_client import ask_qwen
@@ -104,7 +104,8 @@ async def help_command(update: Update, context):
         "/status — статус подключения и очереди\n"
         "/clear — очистить очередь задач\n"
         "/balance — посмотреть баланс кредитов\n"
-        "/redeem <промокод> — активировать промокод\n\n"
+        "/redeem <промокод> — активировать промокод\n"
+        "/buy — купить кредиты за Telegram Stars\n\n"
         f"Твой баланс: {credits} кредитов\n"
         "1 кредит = 1 запрос к AI\n\n"
         "Пиши что хочешь создать в Roblox Studio — AI сгенерирует код!"
@@ -154,6 +155,54 @@ async def redeem_command(update: Update, context):
         f"Промокод активирован! +{PROMO_CREDITS} кредитов.\n"
         f"Твой баланс: {get_credits(user_id)} кредитов."
     )
+
+
+# Пакеты покупки: (stars, credits, label)
+SHOP_PACKAGES = [
+    (3,  1,  "1 кредит — 3 звезды"),
+    (15, 5,  "5 кредитов — 15 звезд"),
+]
+
+
+async def buy_command(update: Update, context):
+    text = (
+        "Купить кредиты за Telegram Stars:\n\n"
+        "1 кредит = 3 звезды\n"
+        "5 кредитов = 15 звезд\n\n"
+        "Выбери пакет:"
+    )
+    await update.message.reply_text(text)
+
+    for stars, credits_amount, label in SHOP_PACKAGES:
+        await context.bot.send_invoice(
+            chat_id=update.effective_chat.id,
+            title=f"{credits_amount} кредит(ов)",
+            description=f"{credits_amount} кредит(ов) для генерации в Roblox Studio",
+            payload=f"credits_{credits_amount}",
+            currency="XTR",
+            prices=[LabeledPrice(label=label, amount=stars)],
+        )
+
+
+async def precheckout_handler(update: Update, context):
+    query = update.pre_checkout_query
+    if query.invoice_payload.startswith("credits_"):
+        await query.answer(ok=True)
+    else:
+        await query.answer(ok=False, error_message="Неизвестный товар.")
+
+
+async def successful_payment_handler(update: Update, context):
+    user_id = update.effective_user.id
+    payload = update.message.successful_payment.invoice_payload
+
+    if payload.startswith("credits_"):
+        credits_amount = int(payload.split("_")[1])
+        user_credits[user_id] = get_credits(user_id) + credits_amount
+        await update.message.reply_text(
+            f"Оплата прошла! +{credits_amount} кредит(ов).\n"
+            f"Твой баланс: {get_credits(user_id)} кредитов."
+        )
 
 
 async def connect_command(update: Update, context):
@@ -592,9 +641,12 @@ async def lifespan(app: FastAPI):
     application.add_handler(CommandHandler("plugin", plugin_command))
     application.add_handler(CommandHandler("balance", balance_command))
     application.add_handler(CommandHandler("redeem", redeem_command))
+    application.add_handler(CommandHandler("buy", buy_command))
     application.add_handler(CommandHandler("connect", connect_command))
     application.add_handler(CommandHandler("status", status_command))
     application.add_handler(CommandHandler("clear", clear_command))
+    application.add_handler(PreCheckoutQueryHandler(precheckout_handler))
+    application.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     await application.initialize()
